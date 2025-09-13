@@ -31,7 +31,7 @@ while 'next_url' in data:
     time.sleep(15)  # avoid hitting rate limit (1 request / ~12s for free tier)
     response = requests.get(data['next_url'] + f'&apiKey={POLYGON_API_KEY}')
     data = response.json()
-    print(data)
+    # print(data)
     tickers.extend(process_response(data))
   
 
