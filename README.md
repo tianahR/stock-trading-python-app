@@ -14,7 +14,7 @@ It automatically handles pagination and includes basic error handling for API ra
   ```bash
   pip install -r requirements.txt
 
-#Setup
+## Setup
 
 Clone or download this repository.
 
@@ -24,11 +24,15 @@ POLYGON_API_KEY=your_api_key_here
 Run the script:
 python script.py
 
-Output
+## Output
 
 The script will create a file called tickers.csv in the project folder.
+Each row in the CSV represents a stock ticker with fields such as:ticker, name, market, locale, primary_exchange, type, active,currency_name, cik, composite_figi, share_class_figi, last_updated_utc
 
-Each row in the CSV represents a stock ticker with fields such as:
 
-ticker, name, market, locale, primary_exchange, type, active,
-currency_name, cik, composite_figi, share_class_figi, last_updated_utc
+## Learning Resources
+
+This project was inspired and guided by:
+- [DataExpert.io](https://dataexpert.io) — tutorials and learning resources  - The Absolutely Free Beginner Data Engineering Boot Camp
+- [Zach Wilson](https://www.linkedin.com/in/eczachly/) — for insights on data engineering and software development  
+
