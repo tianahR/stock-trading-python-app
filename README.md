@@ -27,6 +27,9 @@ python script.py
 To schedule run time every 30 minutes ( you can change code if you want to run it every hour or daily for example)
 python scheduler.py
 
+To Use Windows Task Scheduler 
+run_ticker_script.bat is created 
+
 ## Output
 
 The script will create a file called tickers.csv in the project folder.
