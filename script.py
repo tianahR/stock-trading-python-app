@@ -1,65 +1,146 @@
 import requests
-# import csv
 import time
 import snowflake.connector
 from datetime import datetime
 import os
+import logging
 from dotenv import load_dotenv
-load_dotenv()
 
+# Create a 'logs' folder inside your project if it doesn't exist
+LOG_DIR = r"C:\Users\farah\Dev\stock-trading-python-app\logs"
+os.makedirs(LOG_DIR, exist_ok=True)
+
+LOG_FILE = os.path.join(LOG_DIR, "stock_app.log")
+
+logging.basicConfig(
+    filename=LOG_FILE,
+    filemode="a",
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+
+logging.info("Logging started")
+
+# === Load environment variables from .env ===
+try:
+    load_dotenv(dotenv_path=r"C:\Users\farah\Dev\stock-trading-python-app\.env")
+    logging.info(".env file loaded successfully.")
+except Exception as e:
+    logging.error(f" Failed to load .env file: {e}")
 
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
-
 LIMIT = 1000
-DS = '2025-09-25'
-
-
-    
+DS = datetime.now().strftime('%Y-%m-%d')
 
 def run_stock_job():
-    DS = datetime.now().strftime('%Y-%m-%d')
-
-    url = f'https://api.polygon.io/v3/reference/tickers?market=stocks&active=true&order=asc&limit={LIMIT}&sort=ticker&apiKey={POLYGON_API_KEY}'
-    response = requests.get(url)
     tickers = []
 
-    data = response.json()
-    
-    for ticker in data['results']:
+    url = f'https://api.polygon.io/v3/reference/tickers?market=stocks&active=true&order=asc&limit={LIMIT}&sort=ticker&apiKey={POLYGON_API_KEY}'
+    try:
+        response = requests.get(url)
+        data = response.json()
+    except Exception as e:
+        logging.error(f" Failed to fetch initial tickers: {e}")
+        return
+
+    for ticker in data.get('results', []):
         ticker['ds'] = DS
         tickers.append(ticker)
 
-
-    
     while 'next_url' in data:
-        print('requesting next page', data['next_url'])
-        time.sleep(15)  # avoid hitting rate limit (1 request / ~12s for free tier)
-        response = requests.get(data['next_url'] + f'&apiKey={POLYGON_API_KEY}')
-        data = response.json()
-        
-        for ticker in data['results']:
+        next_url = data['next_url']
+        logging.info(f"Requesting next page: {next_url}")
+        time.sleep(15)
+        try:
+            response = requests.get(next_url + f"&apiKey={POLYGON_API_KEY}")
+            data = response.json()
+        except Exception as e:
+            logging.error(f"Failed to fetch next page: {e}")
+            break
+
+        for ticker in data.get('results', []):
             ticker['ds'] = DS
             tickers.append(ticker)
-    
 
-    example_ticker =  {
-        'ticker': 'ZWS', 
-        'name': 'Zurn Elkay Water Solutions Corporation', 
-        'market': 'stocks', 
-        'locale': 'us', 
-        'primary_exchange': 'XNYS', 
-        'type': 'CS', 
-        'active': True, 
-        'currency_name': 'usd', 
-        'cik': '0001439288', 
-        'composite_figi': 'BBG000H8R0N8', 	
-        'share_class_figi': 'BBG001T36GB5', 
-        'last_updated_utc': '2025-09-11T06:11:10.586204443Z',
-        'ds': '2025-09-27'}
-    
+    logging.info(f"Fetched {len(tickers)} tickers from Polygon API.")
+
+    # Determine schema from example
+    example_ticker = tickers[0] if tickers else {}
     fieldnames = list(example_ticker.keys())
 
-    # Write tickers to CSV with example_ticker schema
+    load_to_snowflake(tickers, fieldnames)
+
+def load_to_snowflake(rows, fieldnames):
+    if not rows:
+        logging.warning("No rows to insert into Snowflake.")
+        return
+
+    try:
+        conn = snowflake.connector.connect(
+            user=os.getenv('SNOWFLAKE_USER'),
+            password=os.getenv('SNOWFLAKE_PASSWORD'),
+            account=os.getenv('SNOWFLAKE_ACCOUNT'),
+            warehouse=os.getenv('SNOWFLAKE_WAREHOUSE'),
+            database=os.getenv('SNOWFLAKE_DATABASE'),
+            schema=os.getenv('SNOWFLAKE_SCHEMA'),
+            role=os.getenv('SNOWFLAKE_ROLE'),
+            session_parameters={"CLIENT_TELEMETRY_ENABLED": False},
+        )
+        cs = conn.cursor()
+
+        # Test connection
+        cs.execute("SELECT CURRENT_TIMESTAMP")
+        server_time = cs.fetchone()[0]
+        logging.info(f"Snowflake connection OK, server time: {server_time}")
+
+        table_name = os.getenv('SNOWFLAKE_TABLE', 'stock_tickers')
+
+        # Create table if not exists
+        type_overrides = {
+            'ticker': 'VARCHAR',
+            'name': 'VARCHAR',
+            'market': 'VARCHAR',
+            'locale': 'VARCHAR',
+            'primary_exchange': 'VARCHAR',
+            'type': 'VARCHAR',
+            'active': 'BOOLEAN',
+            'currency_name': 'VARCHAR',
+            'cik': 'VARCHAR',
+            'composite_figi': 'VARCHAR',
+            'share_class_figi': 'VARCHAR',
+            'last_updated_utc': 'TIMESTAMP_NTZ',   
+            'ds': 'VARCHAR'
+        }
+        columns_sql_parts = [f'"{col.upper()}" {type_overrides.get(col,"VARCHAR")}' for col in fieldnames]
+        create_table_sql = f'CREATE TABLE IF NOT EXISTS {table_name} (' + ', '.join(columns_sql_parts) + ')'
+        cs.execute(create_table_sql)
+
+        # Insert rows
+        column_list = ', '.join([f'"{c.upper()}"' for c in fieldnames])
+        placeholders = ', '.join([f'%({c})s' for c in fieldnames])
+        insert_sql = f'INSERT INTO {table_name} ({column_list}) VALUES ({placeholders})'
+
+        transformed = [{k: t.get(k, None) for k in fieldnames} for t in rows]
+
+        if transformed:
+            cs.executemany(insert_sql, transformed)
+            conn.commit()
+            logging.info(f"Inserted {len(transformed)} rows into {table_name}.")
+
+        cs.close()
+        conn.close()
+
+    except Exception as e:
+        logging.error(f"Snowflake load failed: {e}")
+        raise
+
+if __name__ == '__main__':
+    run_stock_job()
+    logging.info("=== Script finished ===")
+
+
+
+# Write tickers to CSV with example_ticker schema
    
     # output_csv = 'tickers.csv'
     # with open(output_csv, mode='w', newline='', encoding='utf-8') as f:
@@ -69,102 +150,6 @@ def run_stock_job():
     #         row = {key: t.get(key, '') for key in fieldnames}
     #         writer.writerow(row)
     # print(f'Wrote {len(tickers)} rows to {output_csv}')
-    
-    # Load to Snowflake instead of CSV
-    load_to_snowflake(tickers, fieldnames)
-    print(f'Loaded {len(tickers)} rows to Snowflake')
-    
-
-def load_to_snowflake(rows, fieldnames):
-    # Build connection kwargs from environment variables
-    connect_kwargs = {
-        'user': os.getenv('SNOWFLAKE_USER'),
-        'password': os.getenv('SNOWFLAKE_PASSWORD'),
-    }
-    account = os.getenv('SNOWFLAKE_ACCOUNT')
-    if account:
-        connect_kwargs['account'] = account
-
-    warehouse = os.getenv('SNOWFLAKE_WAREHOUSE')
-    database = os.getenv('SNOWFLAKE_DATABASE')
-    schema = os.getenv('SNOWFLAKE_SCHEMA')
-    role = os.getenv('SNOWFLAKE_ROLE')
-    if warehouse:
-        connect_kwargs['warehouse'] = warehouse
-    if database:
-        connect_kwargs['database'] = database
-    if schema:
-        connect_kwargs['schema'] = schema
-    if role:
-        connect_kwargs['role'] = role
-
-    # print(connect_kwargs)
-    conn = snowflake.connector.connect( 
-        user=connect_kwargs['user'],
-        password=connect_kwargs['password'],
-        account=connect_kwargs['account'],
-        database=connect_kwargs['database'],
-        schema=connect_kwargs['schema'],
-        role=connect_kwargs['role'],
-        session_parameters={
-        "CLIENT_TELEMETRY_ENABLED": False,
-        }
-    )
-    try:
-        cs = conn.cursor()
-        try:
-            table_name = os.getenv('SNOWFLAKE_TABLE', 'stock_tickers')
-
-            # Define typed schema based on example_ticker
-            type_overrides = {
-                'ticker': 'VARCHAR',
-                'name': 'VARCHAR',
-                'market': 'VARCHAR',
-                'locale': 'VARCHAR',
-                'primary_exchange': 'VARCHAR',
-                'type': 'VARCHAR',
-                'active': 'BOOLEAN',
-                'currency_name': 'VARCHAR',
-                'cik': 'VARCHAR',
-                'composite_figi': 'VARCHAR',
-                'share_class_figi': 'VARCHAR',
-                'last_updated_utc': 'TIMESTAMP_NTZ',
-                'ds': 'VARCHAR'
-            }
-            columns_sql_parts = []
-            for col in fieldnames:
-                col_type = type_overrides.get(col, 'VARCHAR')
-                columns_sql_parts.append(f'"{col.upper()}" {col_type}')
-
-            create_table_sql = f'CREATE TABLE IF NOT EXISTS {table_name} ( ' + ', '.join(columns_sql_parts) + ' )'
-            cs.execute(create_table_sql)
-
-            column_list = ', '.join([f'"{c.upper()}"' for c in fieldnames])
-            placeholders = ', '.join([f'%({c})s' for c in fieldnames])
-            insert_sql = f'INSERT INTO {table_name} ( {column_list} ) VALUES ( {placeholders} )'
-
-            # Conform rows to fieldnames
-            transformed = []
-            for t in rows:
-                row = {}
-                for k in fieldnames:
-                    row[k] = t.get(k, None)
-                # print(row)
-                transformed.append(row)
-
-            if transformed:
-                cs.executemany(insert_sql, transformed)
-        finally:
-            cs.close()
-    finally:
-        conn.close()
-
-
-if __name__ == '__main__':
-    run_stock_job()
-
-
-
 
 
 

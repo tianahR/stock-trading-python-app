@@ -6,11 +6,8 @@ REM ================================
 REM Change directory to your project folder
 cd /d %USERPROFILE%\Dev\stock-trading-python-app
 
-REM Activate your virtual environment (uncomment if using venv)
-%USERPROFILE%\Dev\stock-trading-python-app\venv\Scripts\activate.bat
+REM Run Python script using the venv interpreter
+%USERPROFILE%\Dev\stock-trading-python-app\.venv\Scripts\python.exe script.py
 
-REM Run the Python script
-python script.py
-
-REM Pause to see errors/output (optional - remove if scheduling)
+REM Pause so you can see errors when testing manually
 REM pause
