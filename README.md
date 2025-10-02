@@ -31,10 +31,12 @@ SNOWFLAKE_ROLE=your_snowflake_role_here
 Run the script in one time:
 python script.py
 
-To schedule run time every 30 minutes ( you can change code if you want to run it every hour or daily for example)
+To schedule run time every 30 minutes ( you can change code if you want to run it every hour or daily for example) manually
 python scheduler.py
 
-To Use Windows Task Scheduler
+To Use Windows Task Scheduler 
+Task Scheduler is a built-in Windows utility that lets you automatically run programs or scripts at specific times or in response to events—basically, it schedules tasks instead of you running them manually.
+Now rows are inserted in Snowflake daily automatically
 run_ticker_script.bat is created
 
 ## Output
