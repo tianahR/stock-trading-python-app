@@ -39,6 +39,9 @@ Task Scheduler is a built-in Windows utility that lets you automatically run pro
 Now rows are inserted in Snowflake daily automatically
 run_ticker_script.bat is created
 
+<img width="1920" height="1200" alt="image" src="https://github.com/user-attachments/assets/744b7956-c873-44dc-97ed-44ba6340ad12" />
+
+
 ## Output
 
 The script created a file called tickers.csv in the project folder.
